@@ -1,14 +1,11 @@
 ﻿using System.Runtime.InteropServices;
 using EditorScene.Edit;
-using EditorScene.Select;
 using HarmonyLib;
 using MelonLoader;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.SceneManagement;
 
-[assembly: MelonInfo(typeof(VisualMaimai_Fix.Core), "VisualMaimai-Fix", "1.0.0", "Starrah", null)]
+[assembly: MelonInfo(typeof(VisualMaimai_Fix.Core), "VM-TouchPad-MidButton-Fix", "1.0.0", "Starrah", null)]
 [assembly: MelonGame("CH3COOOH", "Visual Maimai")]
 
 namespace VisualMaimai_Fix;
@@ -36,25 +33,15 @@ public class Core : MelonMod
             GameObject clickedObject = GetClickedObject();
             if (clickedObject != null)
             {
-                MelonLogger.Msg($"Middle click on {clickedObject.name}");
-                // TODO 这里可以处理点击对象
                 EditMono editMono = clickedObject.GetComponentInParent<EditMono>();
                 if (editMono != null)
                 {
+                    // 模拟以中键手工调用editMono.OnPointerClick
                     PointerEventData eventData = new PointerEventData(EventSystem.current);
                     eventData.position = Input.mousePosition;
                     eventData.button = PointerEventData.InputButton.Middle;
                     editMono.OnPointerClick(eventData);
-                    MelonLogger.Msg($"call editMono.OnPointerClick on {editMono}");
                 }
-                else
-                {
-                    MelonLogger.Msg("No editMono found");
-                }
-            }
-            else
-            {
-                MelonLogger.Msg($"Middle click on null!");
             }
         }
     }
@@ -72,14 +59,5 @@ public class Core : MelonMod
         }
 
         return null;
-    }
-
-    [HarmonyPatch(typeof(EditMono), "OnPointerClick")]
-    [HarmonyPrefix]
-    public static void qwq2(EditMono __instance)
-    {
-        MelonLogger.Msg(
-            $"qwq2 11{__instance} 22{__instance.gameObject.name} 33{__instance.transform.parent} 44{__instance.transform.parent.gameObject.name} " +
-            $"55{__instance.transform.parent.parent.gameObject.name} 66{__instance.transform.parent.parent.parent.gameObject.name}");
     }
 }
