@@ -1,0 +1,3 @@
+[submodule "MaiMuriDX"]
+	path = MaiMuriDX
+	url = https://github.com/Starrah/MaiMuriDX.git
