@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text;
+using EditorScene.Chart;
 using EditorScene.Check;
 using Global.Chart;
 using HarmonyLib;
@@ -35,7 +36,7 @@ public class Core : MelonMod
 
     [HarmonyPatch(typeof(ChartWatcher), nameof(ChartWatcher.Check))]
     [HarmonyPostfix]
-    private static void Postfix(NotesData chart)
+    private static void Postfix(NotesData chart, ref Dictionary<TimeData, List<CheckResult>> results)
     {
         Process process = null;
         try
@@ -69,6 +70,8 @@ public class Core : MelonMod
                 WorkingDirectory = Path.GetDirectoryName(cliPath)!,
             };
             psi.ArgumentList.Add(cliPath);
+            psi.ArgumentList.Add("--first");
+            psi.ArgumentList.Add(OperationManager.Chart.offset.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
             psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
             psi.EnvironmentVariables["PYTHONUTF8"] = "1";
 
@@ -97,7 +100,9 @@ public class Core : MelonMod
                 return;
             }
 
-            MelonLogger.Msg($"MaiMuriDX report:\n{stdout}");
+            var report = stdout.ToString();
+            var parsed = MaiMuriReportParser.Parse(report);
+            MaiMuriReportParser.MergeIntoResults(parsed, chart.bpmList, results);
         }
         catch (ThreadAbortException) { /* VM主动发起的进程abort。因此直接忽略即可 */ }
         finally

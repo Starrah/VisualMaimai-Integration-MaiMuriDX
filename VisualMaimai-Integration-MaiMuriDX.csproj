@@ -400,6 +400,7 @@
 
 	<ItemGroup>
 		<Compile Include="Core.cs" />
+		<Compile Include="MaiMuriReportParser.cs" />
 	</ItemGroup>
 
 	<ItemGroup>
