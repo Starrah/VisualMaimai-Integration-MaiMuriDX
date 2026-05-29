@@ -1,9 +1,10 @@
-using EditorScene.Chart;
-using Gameplay.Manager;
+using System.Diagnostics;
+using System.Reflection;
+using System.Text;
+using EditorScene.Check;
 using Global.Chart;
 using HarmonyLib;
 using MelonLoader;
-using UnityEngine;
 
 [assembly: MelonInfo(typeof(Starrah.VM_MaiMuri.Core), "VisualMaimai-Integration-MaiMuriDX", "2.0.0", "Starrah")]
 [assembly: MelonGame("CH3COOOH", "Visual Maimai")]
@@ -13,60 +14,110 @@ namespace Starrah.VM_MaiMuri;
 [HarmonyPatch]
 public class Core : MelonMod
 {
-    private const float DebounceSeconds = 1.0f;
+    private const string PythonExecutable = "python";
+    private const int RunTimeoutMs = 30000;
+    private const int DebounceMs = 300;
 
-    private static bool _dirty;
-    private static float _dirtyAt;
+    private static string cliPath;
 
     public override void OnInitializeMelon()
     {
-        OperationManager.OnChartUpdate += MarkDirty;
-        HarmonyInstance.PatchAll();
-        MelonLogger.Msg("Initialized.");
-    }
-
-    public override void OnDeinitializeMelon()
-    {
-        OperationManager.OnChartUpdate -= MarkDirty;
-    }
-    
-    [HarmonyPatch(typeof(InitManager), nameof(InitManager.Init))]
-    [HarmonyPostfix]
-    private static void InitManagerPostfix() => MarkDirty();
-
-    private static void MarkDirty()
-    {
-        _dirty = true;
-        _dirtyAt = Time.unscaledTime;
-    }
-
-    public override void OnUpdate()
-    {
-        if (!_dirty) return;
-        if (Time.unscaledTime - _dirtyAt < DebounceSeconds) return;
-
-        var chartData = InitManager.ChartData;
-        if (chartData == null)
+        var expected = GetMaiMuriDXPath();
+        if (expected == null || !File.Exists(expected))
         {
-            _dirty = false;
+            MelonLogger.Error($"未找到有效的MaiMuriDX程序，无法启用本Mod的功能。请确保按照文档所述正确的配置了MaiMuriDX。（MaiMuriDX的cli.py应当位于：{expected ?? "<unknown>"}）");
             return;
         }
+        cliPath = expected;
+        HarmonyInstance.PatchAll();
+        MelonLogger.Msg("MaiMuriDX集成模块已加载");
+    }
 
-        string simaiNotes;
+    [HarmonyPatch(typeof(ChartWatcher), nameof(ChartWatcher.Check))]
+    [HarmonyPostfix]
+    private static void Postfix(NotesData chart)
+    {
+        Process process = null;
         try
         {
-            simaiNotes = ChartExporter.ExportNote(chartData, false);
-        }
-        catch (Exception e)
-        {
-            _dirty = false;
-            MelonLogger.Warning($"Failed to export simai notes: {e}");
-            return;
-        }
+            // 等一小会再开始检查。（这期间VM内置的逻辑可能会把这个线程整个销毁掉，也就不触发python调用了）
+            // 不然高速连点的情况下会反复fork进程又立即销毁。
+            Thread.Sleep(DebounceMs);
 
-        if (MuriChecker.TryCheckAsync(simaiNotes))
+            string simaiNotes;
+            try
+            {
+                simaiNotes = ChartExporter.ExportNote(chart, false);
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Warning($"Failed to export simai notes: {e}");
+                return;
+            }
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = PythonExecutable,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardInputEncoding = new UTF8Encoding(false), // 没有BOM
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(cliPath)!,
+            };
+            psi.ArgumentList.Add(cliPath);
+            psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+            psi.EnvironmentVariables["PYTHONUTF8"] = "1";
+
+            process = new Process { StartInfo = psi };
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            
+            process.StandardInput.Write(simaiNotes);
+            process.StandardInput.Close();
+
+            if (!process.WaitForExit(RunTimeoutMs))
+            {
+                try { process.Kill(); } catch { /*ignored*/ }
+                MelonLogger.Warning($"MaiMuriDX timed out after {RunTimeoutMs}ms.");
+                return;
+            }
+            process.WaitForExit(); // WaitForExit(timeout) doesn't wait for async output handlers to finish; the parameterless overload does.
+            if (process.ExitCode != 0)
+            {
+                MelonLogger.Warning($"MaiMuriDX exited with code {process.ExitCode}.\nstderr: {stderr}");
+                return;
+            }
+
+            MelonLogger.Msg($"MaiMuriDX report:\n{stdout}");
+        }
+        catch (ThreadAbortException) { /* VM主动发起的进程abort。因此直接忽略即可 */ }
+        finally
         {
-            _dirty = false;
+            try { if (process != null && !process.HasExited) process.Kill(); } catch { /*ignored*/ }
+            try { process?.Dispose(); } catch { /*ignored*/ }
+        }
+    }
+
+    private static string GetMaiMuriDXPath()
+    {
+        try
+        {
+            var loc = Assembly.GetExecutingAssembly().Location;
+            if (string.IsNullOrEmpty(loc)) return null;
+            return Path.Combine(Path.GetDirectoryName(loc)!, "MaiMuriDX", "cli.py");
+        }
+        catch
+        {
+            return null;
         }
     }
 }
