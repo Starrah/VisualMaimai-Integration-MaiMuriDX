@@ -1,0 +1,114 @@
+name: Build
+
+on:
+  push:
+    branches: [master, ci-test]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  VM_RELEASE_TAG: v1.3.1
+  VM_RELEASE_ASSET: Visual.Maimai.release.1.3.1.zip
+  ML_RELEASE_TAG: v0.7.3
+  ML_RELEASE_ASSET: MelonLoader.x64.zip
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Download Visual Maimai (reference assemblies)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/CH3COOOHH/Visual-Maimai-Release/releases/download/$env:VM_RELEASE_TAG/$env:VM_RELEASE_ASSET"
+          Invoke-WebRequest -Uri $url -OutFile vm.zip
+          Expand-Archive -Path vm.zip -DestinationPath vm-extract
+
+          $dataDir = Get-ChildItem -Path vm-extract -Recurse -Directory -Filter "Visual Maimai_Data" |
+            Select-Object -First 1
+          if (-not $dataDir) {
+            throw "Visual Maimai_Data not found in release archive"
+          }
+
+          $vmRoot = $dataDir.Parent.FullName
+          Write-Host "VMRootDir=$vmRoot"
+          "VMRootDir=$vmRoot" >> $env:GITHUB_ENV
+
+      - name: Install MelonLoader
+        shell: pwsh
+        run: |
+          $url = "https://github.com/LavaGang/MelonLoader/releases/download/$env:ML_RELEASE_TAG/$env:ML_RELEASE_ASSET"
+          Invoke-WebRequest -Uri $url -OutFile ml.zip
+          tar -xf ml.zip -C "$env:VMRootDir"
+
+          $melonDll = Join-Path $env:VMRootDir "MelonLoader\net35\MelonLoader.dll"
+          $harmonyDll = Join-Path $env:VMRootDir "MelonLoader\net35\0Harmony.dll"
+          if (-not (Test-Path $melonDll) -or -not (Test-Path $harmonyDll)) {
+            throw "MelonLoader install failed: missing reference assemblies under MelonLoader\net35"
+          }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet build VisualMaimai-Integration-MaiMuriDX.csproj `
+            -c Release `
+            -p:VMRootDir="$env:VMRootDir"
+
+      - name: Pack artifact
+        shell: pwsh
+        run: |
+          $artifactDir = "artifact"
+          $buildDir = "bin/Release/netstandard2.1"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          Copy-Item "$buildDir/VisualMaimai-Integration-MaiMuriDX.dll" $artifactDir
+          Copy-Item "$buildDir/MaiMuriDX" $artifactDir -Recurse
+          Compress-Archive -Path "$artifactDir/*" -DestinationPath VisualMaimai-Integration-MaiMuriDX.zip -Force
+
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: VisualMaimai-Integration-MaiMuriDX.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VisualMaimai-Integration-MaiMuriDX
+          path: VisualMaimai-Integration-MaiMuriDX.zip
+
+      - name: Delete latest release and tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "No existing latest release to delete."
+            $global:LASTEXITCODE = 0
+          }
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 最新版本
+          target_commitish: ${{ github.sha }}
+          body: |
+            由master分支最新代码自动构建，保持滚动更新为最新版本（当前Workflow run ID: #${{ github.run_number }}）
+
+            压缩包内含 `VisualMaimai-Integration-MaiMuriDX.dll` 和 `MaiMuriDX/` 文件夹，解压后并列放入 Visual Maimai 的 `Mods` 目录即可。（请确保给Visual Maimai装好了MelonLoader，详见README）
+          files: VisualMaimai-Integration-MaiMuriDX.zip
+          make_latest: true
