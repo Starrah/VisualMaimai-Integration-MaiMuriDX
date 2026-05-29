@@ -418,7 +418,7 @@
 		<Touch Files="$(TargetDir)MaiMuriDX\.stamp" AlwaysCreate="true" />
 	</Target>
 
-	<Target Name="PostBuild" AfterTargets="CopyMaiMuriToTargetDir">
+	<Target Name="PostBuild" AfterTargets="CopyMaiMuriToTargetDir" Condition="'$(CI)' != 'true'">
 		<Exec Command="COPY /Y &quot;$(TargetPath)&quot; &quot;$(VMRootDir)\Mods&quot;" />
 		<MakeDir Directories="$(VMRootDir)\Mods\MaiMuriDX;$(VMRootDir)\Mods\MaiMuriDX\svg" />
 		<Copy SourceFiles="@(MaiMuriRootFiles)" DestinationFolder="$(VMRootDir)\Mods\MaiMuriDX" SkipUnchangedFiles="true" />

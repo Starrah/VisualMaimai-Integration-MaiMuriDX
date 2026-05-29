@@ -16,7 +16,7 @@
    - 安装[Python](https://www.python.org/downloads/)。
      - 我测试的版本为3.12，但理论上只要别太低的版本应该都可以。
      - MaiMuriDX的CLI模式下并没有依赖任何外部库，因此你不需要配置独立的环境或者安装任何依赖之类的。只要把Python本体安装好就行了。
-2. 从Github Action里下载编译好的文件
+2. 从Release里下载编译好的文件
    - 下载到的压缩包中包含一个`VisualMaimai-Integration-MaiMuriDX.dll`文件和一个`MaiMuriDX`文件夹。
    - 将它们俩并列放在`<Visual Maimai的安装路径>/Mods`里即可。
    - 当然你也可以自己编译：
