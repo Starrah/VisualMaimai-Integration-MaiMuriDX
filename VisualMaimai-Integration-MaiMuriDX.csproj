@@ -400,9 +400,28 @@
 
 	<ItemGroup>
 		<Compile Include="Core.cs" />
+		<Compile Include="MuriChecker.cs" />
 	</ItemGroup>
-	
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-		<Exec Command="COPY &quot;$(TargetPath)&quot; &quot;D:\Visual Maimai\Mods&quot;" />
+
+	<ItemGroup>
+		<MaiMuriRootFiles Include="$(MSBuildThisFileDirectory)MaiMuriDX\*.py;$(MSBuildThisFileDirectory)MaiMuriDX\config.json" />
+		<MaiMuriSvgFiles Include="$(MSBuildThisFileDirectory)MaiMuriDX\svg\**\*.py" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<GameModsDir>D:\Visual Maimai\Mods</GameModsDir>
+	</PropertyGroup>
+
+	<Target Name="CopyMaiMuriToTargetDir" AfterTargets="Build" Inputs="@(MaiMuriRootFiles);@(MaiMuriSvgFiles)" Outputs="$(TargetDir)MaiMuriDX\.stamp">
+		<Copy SourceFiles="@(MaiMuriRootFiles)" DestinationFolder="$(TargetDir)MaiMuriDX" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(MaiMuriSvgFiles)" DestinationFolder="$(TargetDir)MaiMuriDX\svg" SkipUnchangedFiles="true" />
+		<Touch Files="$(TargetDir)MaiMuriDX\.stamp" AlwaysCreate="true" />
+	</Target>
+
+	<Target Name="PostBuild" AfterTargets="CopyMaiMuriToTargetDir">
+		<Exec Command="COPY /Y &quot;$(TargetPath)&quot; &quot;$(GameModsDir)&quot;" />
+		<MakeDir Directories="$(GameModsDir)\MaiMuriDX;$(GameModsDir)\MaiMuriDX\svg" />
+		<Copy SourceFiles="@(MaiMuriRootFiles)" DestinationFolder="$(GameModsDir)\MaiMuriDX" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(MaiMuriSvgFiles)" DestinationFolder="$(GameModsDir)\MaiMuriDX\svg" SkipUnchangedFiles="true" />
 	</Target>
 </Project>

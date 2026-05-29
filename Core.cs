@@ -29,6 +29,10 @@ public class Core : MelonMod
     {
         OperationManager.OnChartUpdate -= MarkDirty;
     }
+    
+    [HarmonyPatch(typeof(InitManager), nameof(InitManager.Init))]
+    [HarmonyPostfix]
+    private static void InitManagerPostfix() => MarkDirty();
 
     private static void MarkDirty()
     {
@@ -40,10 +44,13 @@ public class Core : MelonMod
     {
         if (!_dirty) return;
         if (Time.unscaledTime - _dirtyAt < DebounceSeconds) return;
-        _dirty = false;
 
         var chartData = InitManager.ChartData;
-        if (chartData == null) return;
+        if (chartData == null)
+        {
+            _dirty = false;
+            return;
+        }
 
         string simaiNotes;
         try
@@ -52,15 +59,14 @@ public class Core : MelonMod
         }
         catch (Exception e)
         {
+            _dirty = false;
             MelonLogger.Warning($"Failed to export simai notes: {e}");
             return;
         }
 
-        MelonLogger.Msg($"Chart updated, notes length = {simaiNotes.Length}, {simaiNotes[..Math.Min(25, simaiNotes.Length)]}");
-        // TODO: feed `simaiNotes` to MaiMuriDX here.
+        if (MuriChecker.TryCheckAsync(simaiNotes))
+        {
+            _dirty = false;
+        }
     }
-
-    [HarmonyPatch(typeof(InitManager), nameof(InitManager.Init))]
-    [HarmonyPostfix]
-    private static void InitManagerPostfix() => MarkDirty();
 }
