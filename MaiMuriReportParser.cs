@@ -8,11 +8,15 @@ using Settings.Managers;
 
 namespace Starrah.VM_MaiMuri;
 
-internal struct ParsedMuri
+internal enum MuriKind { 内屏 = 100, 多押 = 101, 叠键 = 102, 外键 = 103, 撞尾 = 104 }
+
+internal class ParsedMuri
 {
     public float TimeSeconds;
-    public int Code;
+    public int Combo;
+    public MuriKind Kind;
     public string Info;
+    public bool IsStatic;
 }
 
 internal static class MaiMuriReportParser
@@ -21,28 +25,23 @@ internal static class MaiMuriReportParser
         @"^\[(\d{2}):(\d{2})F([\d.]+)\]\s*(.*)$",
         RegexOptions.Compiled);
 
+    private static readonly Regex ComboRegex = new(
+        @"(\d+)cb",
+        RegexOptions.Compiled);
+
     private static readonly Regex MuriHeaderRegex = new(
         @"(内屏无理|多押无理|叠键无理|外键无理|撞尾无理)",
         RegexOptions.Compiled);
 
-    // MaiMuriDX result codes (100+) — distinct from VM built-in 0..8.
-    public const int Code_内屏 = 100;
-    public const int Code_多押 = 101;
-    public const int Code_叠键_Static = 102;
-    public const int Code_外键 = 103;
-    public const int Code_撞尾 = 104;
-    public const int Code_叠键_Dynamic = 105;
-
     public static List<ParsedMuri> Parse(string stdout)
     {
-        var messages = CollapseMessages(stdout);
         var parsed = new List<ParsedMuri>();
-        foreach (var raw in messages)
+        foreach (var raw in CollapseMessages(stdout))
         {
-            if (ParseMessage(raw, out var item))
+            if (ParseMessage(raw.Text, raw.IsStaticSection, out var item))
                 parsed.Add(item);
         }
-        return parsed;
+        return DeduplicateStaticDynamic(parsed);
     }
 
     public static void MergeIntoResults(
@@ -56,7 +55,7 @@ internal static class MaiMuriReportParser
             if (time.split == 0)
                 continue;
 
-            var result = new CheckResult(ResultType.Bad, item.Code, item.Info);
+            var result = new CheckResult(ResultType.Bad, (int)item.Kind, item.Info);
             if (!results.TryGetValue(time, out var list))
             {
                 results[time] = new List<CheckResult> { result };
@@ -68,22 +67,55 @@ internal static class MaiMuriReportParser
         }
     }
 
-    /// <summary>
-    /// Inverse of <see cref="BpmData.GetTime"/>, matching VM's ProgressPanel.GetAdsorptionTime.
-    /// GetBeat returns the same float as (float)TimeData, i.e. 4 * beat / split.
-    /// </summary>
+    /**
+     * 1. 对叠键无理，如果同一个音符静态和动态都查到了，则只保留静态的结果，删除动态的结果。
+     * 2. 对其他类型的无理，如果静态和动态都查到了，则字符串结果仅保留动态的检查结果，但时间戳以静态的为准。
+     */
+    private static List<ParsedMuri> DeduplicateStaticDynamic(List<ParsedMuri> items)
+    {
+        var result = new List<ParsedMuri>();
+        var staticDict = new Dictionary<(int, MuriKind), ParsedMuri>();
+
+        foreach (var item in items)
+        {
+            var key = (item.Combo, item.Kind);
+            if (!item.IsStatic && item.Combo >= 0 && staticDict.ContainsKey(key))
+            { // 对动态的无理，如果静态阶段已经被检查到过：
+                if (item.Kind == MuriKind.叠键) continue; // 叠键无理，直接删除动态的结果，只留下静态结果
+                else
+                {
+                    // ReSharper disable once NotAccessedVariable
+                    staticDict.Remove(key, out var staticItem);
+                    staticItem.IsStatic = false;
+                    staticItem.Info = item.Info; // 其他类型的无理，字符串info替换为动态的结果，但时间戳仍以静态的为准
+                    continue;
+                }
+            }
+            
+            result.Add(item);
+            if (item.IsStatic && item.Combo >= 0) staticDict.TryAdd(key, item);
+        }
+        return result;
+    }
+
     private static TimeData SecondsToTimeData(BpmData bpm, float seconds)
     {
         var beatSplit = SettingsManager.CurrentSettings.beatSplit;
         var beatFloat = bpm.GetBeat(seconds);
-        MelonLogger.Msg($"{seconds}:{(long)Math.Round(beatFloat / 4f * beatSplit)}/{beatSplit}");
         return new TimeData(beatSplit, (long)Math.Round(beatFloat / 4f * beatSplit)).Normalize();
     }
 
-    private static List<string> CollapseMessages(string stdout)
+    private static int ParseAffectedCombo(string body)
     {
-        var messages = new List<string>();
+        var match = ComboRegex.Match(body);
+        return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : -1;
+    }
+
+    private static List<(string Text, bool IsStaticSection)> CollapseMessages(string stdout)
+    {
+        var messages = new List<(string Text, bool IsStaticSection)>();
         var current = new StringBuilder();
+        var inStaticSection = false;
 
         foreach (var rawLine in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
         {
@@ -91,13 +123,23 @@ internal static class MaiMuriReportParser
             if (line.Length == 0)
                 continue;
 
+            if (line.Contains("========== 静态检查 ==========", StringComparison.Ordinal))
+            {
+                inStaticSection = true;
+                continue;
+            }
+            if (line.Contains("========== 动态检查 ==========", StringComparison.Ordinal))
+            {
+                inStaticSection = false;
+                continue;
+            }
             if (IsNoiseLine(line))
                 continue;
 
             if (IsMessageStart(line))
             {
                 if (current.Length > 0)
-                    messages.Add(current.ToString());
+                    messages.Add((current.ToString(), inStaticSection));
                 current.Clear();
                 current.Append(line);
             }
@@ -109,7 +151,7 @@ internal static class MaiMuriReportParser
         }
 
         if (current.Length > 0)
-            messages.Add(current.ToString());
+            messages.Add((current.ToString(), inStaticSection));
         return messages;
     }
 
@@ -123,10 +165,9 @@ internal static class MaiMuriReportParser
 
     private static bool IsMessageStart(string line) => TimestampRegex.IsMatch(line);
 
-    private static bool ParseMessage(string message, out ParsedMuri item)
+    private static bool ParseMessage(string message, bool isStaticSection, out ParsedMuri item)
     {
-        item = default;
-
+        item = null;
         var ts = TimestampRegex.Match(message);
         if (!ts.Success)
             return false;
@@ -141,28 +182,28 @@ internal static class MaiMuriReportParser
         if (!header.Success)
             return false;
 
-        int code;
+        MuriKind kind;
         string info;
         switch (header.Groups[1].Value)
         {
             case "内屏无理":
-                code = Code_内屏;
+                kind = MuriKind.内屏;
                 info = TrimInnerScreenBody(body);
                 break;
             case "多押无理":
-                code = Code_多押;
+                kind = MuriKind.多押;
                 info = NormalizeMultiTouchBody(body);
                 break;
             case "叠键无理":
-                code = body.Contains("重叠", StringComparison.Ordinal) ? Code_叠键_Static : Code_叠键_Dynamic;
+                kind = MuriKind.叠键;
                 info = body;
                 break;
             case "外键无理":
-                code = Code_外键;
+                kind = MuriKind.外键;
                 info = body;
                 break;
             case "撞尾无理":
-                code = Code_撞尾;
+                kind = MuriKind.撞尾;
                 info = body;
                 break;
             default:
@@ -171,9 +212,11 @@ internal static class MaiMuriReportParser
 
         item = new ParsedMuri
         {
+            Combo = ParseAffectedCombo(body),
             TimeSeconds = timeSeconds,
-            Code = code,
-            Info = info
+            Info = info,
+            Kind = kind,
+            IsStatic = isStaticSection,
         };
         return true;
     }

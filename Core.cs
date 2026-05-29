@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text;
-using EditorScene.Chart;
 using EditorScene.Check;
 using Global.Chart;
 using HarmonyLib;
@@ -36,7 +35,7 @@ public class Core : MelonMod
 
     [HarmonyPatch(typeof(ChartWatcher), nameof(ChartWatcher.Check))]
     [HarmonyPostfix]
-    private static void Postfix(NotesData chart, ref Dictionary<TimeData, List<CheckResult>> results)
+    private static void RunMaiMuriDX(NotesData chart, ref Dictionary<TimeData, List<CheckResult>> results)
     {
         Process process = null;
         try
@@ -70,8 +69,6 @@ public class Core : MelonMod
                 WorkingDirectory = Path.GetDirectoryName(cliPath)!,
             };
             psi.ArgumentList.Add(cliPath);
-            psi.ArgumentList.Add("--first");
-            psi.ArgumentList.Add(OperationManager.Chart.offset.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
             psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
             psi.EnvironmentVariables["PYTHONUTF8"] = "1";
 
@@ -124,5 +121,19 @@ public class Core : MelonMod
         {
             return null;
         }
+    }
+
+    [HarmonyPatch(typeof(CheckResult), nameof(CheckResult.ToString))]
+    [HarmonyPrefix]
+    private static bool CheckResultToString(CheckResult __instance, ref string __result)
+    {
+        if (__instance.Code < 100) return true; // 非MaiMuriDX，而是VM原生的无理
+        __result = __instance.Type switch
+        {
+            ResultType.Bad => $"<color=#FF6767>[MaiMuriDX] {__instance.Info}</color>",
+            ResultType.Warning => $"<color=#FDFF45>[MaiMuriDX] {__instance.Info}</color>",
+            _ => throw new ArgumentOutOfRangeException(),
+        };
+        return false;
     }
 }
