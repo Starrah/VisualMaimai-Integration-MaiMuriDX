@@ -14,8 +14,8 @@ namespace Starrah.VM_MaiMuri;
 public class Core : MelonMod
 {
     private const string PythonExecutable = "python";
-    private const int RunTimeoutMs = 10000;
-    private const int DebounceMs = 300;
+    private const int RunTimeoutMs = 5000;
+    private const int DebounceMs = 0;
 
     private static string cliPath;
 
