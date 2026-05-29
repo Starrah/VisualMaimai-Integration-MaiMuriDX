@@ -11,11 +11,10 @@ using MelonLoader;
 
 namespace Starrah.VM_MaiMuri;
 
-[HarmonyPatch]
 public class Core : MelonMod
 {
     private const string PythonExecutable = "python";
-    private const int RunTimeoutMs = 30000;
+    private const int RunTimeoutMs = 10000;
     private const int DebounceMs = 300;
 
     private static string cliPath;
@@ -29,20 +28,22 @@ public class Core : MelonMod
             return;
         }
         cliPath = expected;
-        HarmonyInstance.PatchAll();
+        HarmonyInstance.PatchAll(GetType());
         MelonLogger.Msg("MaiMuriDX集成模块已加载");
     }
 
     [HarmonyPatch(typeof(ChartWatcher), nameof(ChartWatcher.Check))]
     [HarmonyPostfix]
-    private static void RunMaiMuriDX(NotesData chart, ref Dictionary<TimeData, List<CheckResult>> results)
+    private static void RunMaiMuriDX(NotesData chart, ref Dictionary<TimeData, List<CheckResult>> results, ref bool __result)
     {
         Process process = null;
         try
         {
             // 等一小会再开始检查。（这期间VM内置的逻辑可能会把这个线程整个销毁掉，也就不触发python调用了）
             // 不然高速连点的情况下会反复fork进程又立即销毁。
-            Thread.Sleep(DebounceMs);
+#pragma warning disable CS0162 // 检测到不可到达的代码
+            if (DebounceMs > 0) Thread.Sleep(DebounceMs);
+#pragma warning restore CS0162 // 检测到不可到达的代码
 
             string simaiNotes;
             try
@@ -100,6 +101,7 @@ public class Core : MelonMod
             var report = stdout.ToString();
             var parsed = MaiMuriReportParser.Parse(report);
             MaiMuriReportParser.MergeIntoResults(parsed, chart.bpmList, results);
+            __result = results.Count == 0;
         }
         catch (ThreadAbortException) { /* VM主动发起的进程abort。因此直接忽略即可 */ }
         finally

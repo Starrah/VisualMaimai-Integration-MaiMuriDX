@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using EditorScene.Check;
 using Global.Chart;
-using MelonLoader;
 using Settings.Managers;
 
 namespace Starrah.VM_MaiMuri;
@@ -33,6 +32,18 @@ internal static class MaiMuriReportParser
         @"(内屏无理|多押无理|叠键无理|外键无理|撞尾无理)",
         RegexOptions.Compiled);
 
+    private static readonly Regex LineColumnRegex = new(
+        @"\(L\d+,C\d+\)",
+        RegexOptions.Compiled);
+    
+    private static readonly Regex MultipleSpaceRegex = new(
+        @"\s{2,}",
+        RegexOptions.Compiled);
+    
+    private static readonly Regex CPRangeRegex = new(
+        @"CP区间±\s*(\d+)\s*ms",
+        RegexOptions.Compiled);
+
     public static List<ParsedMuri> Parse(string stdout)
     {
         var parsed = new List<ParsedMuri>();
@@ -44,6 +55,22 @@ internal static class MaiMuriReportParser
         return DeduplicateStaticDynamic(parsed);
     }
 
+    // 显示等级的规则
+    private static ResultType GetResultType(ParsedMuri item)
+    {
+        var result = ResultType.Bad;
+        if (item.Kind == MuriKind.多押) result = ResultType.Warning; // 多押全是警告
+        if (item.Info.Contains("可能") || item.Info.Contains("似乎")) result = ResultType.Warning; // 含有不确定词汇的，警告
+        if (item.Kind is MuriKind.外键 or MuriKind.撞尾 && item.Info.Contains("x")) result = ResultType.Warning; // 保护套规避的外键或者撞尾无理，警告
+        if (item.Kind == MuriKind.内屏)
+        { // 很慢的星星构成的内无是警告
+            var cpRangeMatch = CPRangeRegex.Match(item.Info);
+            var cpRange = cpRangeMatch.Success ? int.Parse(cpRangeMatch.Groups[1].Value) : 0;
+            if (cpRange >= 500 || (item.Info.Contains("w") && cpRange >= 335)) result = ResultType.Warning;
+        }
+        return result;
+    }
+    
     public static void MergeIntoResults(
         IEnumerable<ParsedMuri> items,
         BpmData bpm,
@@ -55,7 +82,7 @@ internal static class MaiMuriReportParser
             if (time.split == 0)
                 continue;
 
-            var result = new CheckResult(ResultType.Bad, (int)item.Kind, item.Info);
+            var result = new CheckResult(GetResultType(item), (int)item.Kind, FormatInfoForUi(item.Info));
             if (!results.TryGetValue(time, out var list))
             {
                 results[time] = new List<CheckResult> { result };
@@ -93,7 +120,19 @@ internal static class MaiMuriReportParser
             }
             
             result.Add(item);
-            if (item.IsStatic && item.Combo >= 0) staticDict.TryAdd(key, item);
+            if (item.IsStatic && item.Combo >= 0)
+            {
+                staticDict.TryAdd(key, item);
+                
+                if (item.Kind == MuriKind.叠键)
+                { // 叠键的情况，要把其他被叠的键的所有cb也加进去
+                    foreach (var match in ComboRegex.Matches(item.Info).Skip(1))
+                    {
+                        var cbValue = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                        staticDict.TryAdd((cbValue, MuriKind.叠键), item);
+                    }
+                }
+            }
         }
         return result;
     }
@@ -219,6 +258,12 @@ internal static class MaiMuriReportParser
             IsStatic = isStaticSection,
         };
         return true;
+    }
+
+    private static string FormatInfoForUi(string info)
+    {
+        info = LineColumnRegex.Replace(info, "");
+        return MultipleSpaceRegex.Replace(info, " ").Trim();
     }
 
     private static string TrimInnerScreenBody(string body)
