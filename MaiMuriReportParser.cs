@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using EditorScene.Check;
 using Global.Chart;
+using MelonLoader;
 using Settings.Managers;
 
 namespace Starrah.VM_MaiMuri;
@@ -106,13 +107,22 @@ internal static class MaiMuriReportParser
         foreach (var item in items)
         {
             var key = (item.Combo, item.Kind);
-            if (!item.IsStatic && item.Combo >= 0 && staticDict.ContainsKey(key))
-            { // 对动态的无理，如果静态阶段已经被检查到过：
-                if (item.Kind == MuriKind.叠键) continue; // 叠键无理，直接删除动态的结果，只留下静态结果
-                else
-                {
-                    // ReSharper disable once NotAccessedVariable
-                    staticDict.Remove(key, out var staticItem);
+            if (!item.IsStatic && item.Combo >= 0)
+            {
+                if (staticDict.ContainsKey(key))
+                { // 对动态的无理，如果静态阶段已经被检查到过：
+                    if (item.Kind == MuriKind.叠键) continue; // 叠键无理，直接删除动态的结果，只留下静态结果
+                    else
+                    {
+                        staticDict.Remove(key, out var staticItem);
+                        staticItem.IsStatic = false;
+                        staticItem.Info = item.Info; // 其他类型的无理，字符串info替换为动态的结果，但时间戳仍以静态的为准
+                        continue;
+                    }
+                }
+                else if (item.Kind == MuriKind.撞尾 && staticDict.TryGetValue((item.Combo, MuriKind.外键), out var staticItem))
+                { // 有一种特殊情况，会把同一组无理，在静态时检测为外键、在动态时检测为撞尾。需要特殊处理一下。
+                    staticDict.Remove((item.Combo, MuriKind.外键));
                     staticItem.IsStatic = false;
                     staticItem.Info = item.Info; // 其他类型的无理，字符串info替换为动态的结果，但时间戳仍以静态的为准
                     continue;
@@ -154,32 +164,24 @@ internal static class MaiMuriReportParser
     {
         var messages = new List<(string Text, bool IsStaticSection)>();
         var current = new StringBuilder();
-        var inStaticSection = false;
+        var inStaticSection = true;
 
         foreach (var rawLine in stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
         {
             var line = rawLine.TrimEnd();
-            if (line.Length == 0)
-                continue;
-
-            if (line.Contains("========== 静态检查 ==========", StringComparison.Ordinal))
-            {
-                inStaticSection = true;
-                continue;
-            }
+            if (line.Length == 0) continue;
+            
             if (line.Contains("========== 动态检查 ==========", StringComparison.Ordinal))
             {
+                AddCurrent();
                 inStaticSection = false;
                 continue;
             }
-            if (IsNoiseLine(line))
-                continue;
+            if (IsNoiseLine(line)) continue;
 
             if (IsMessageStart(line))
             {
-                if (current.Length > 0)
-                    messages.Add((current.ToString(), inStaticSection));
-                current.Clear();
+                AddCurrent();
                 current.Append(line);
             }
             else if (current.Length > 0)
@@ -189,9 +191,15 @@ internal static class MaiMuriReportParser
             }
         }
 
-        if (current.Length > 0)
-            messages.Add((current.ToString(), inStaticSection));
+        AddCurrent();
         return messages;
+
+        void AddCurrent()
+        {
+            if (current.Length > 0) 
+                messages.Add((current.ToString(), inStaticSection));
+            current.Clear();
+        }
     }
 
     private static bool IsNoiseLine(string line)
