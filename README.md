@@ -1,6 +1,6 @@
 # VisualMaimai-Integration-MaiMuriDX
 
-面向 [Visual Maimai](https://github.com/CH3COOOHH/Visual-Maimai-Release) 谱面编辑器的 MelonLoader Mod，将 [MaiMuriDX](https://github.com/Minepig/MaiMuriDX) 的无理检测能力接入编辑器内置的「谱面检查」流程。在 VM 原有检查之外，额外报告内屏、多押、叠键、外键、撞尾等 DX 谱面无理问题。
+面向 [Visual Maimai](https://github.com/CH3COOOHH/Visual-Maimai-Release) 谱面编辑器的 MelonLoader Mod，将 [MaiMuriDX](https://github.com/Minepig/MaiMuriDX) 的无理检测能力接入编辑器内置的「谱面检查」流程。在 VM 原有检查之外，额外报告内屏、多押、叠键、外键、撞尾等谱面无理问题。
 > 妈妈再也不怕我写谱写出无理了！
 
 ## 功能
