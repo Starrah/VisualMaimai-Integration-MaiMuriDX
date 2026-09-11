@@ -16,8 +16,11 @@ public class Core : MelonMod
     private const string PythonExecutable = "python";
     private const int RunTimeoutMs = 5000;
     private const int DebounceMs = 0;
+    
+    private const int BackupChartIntervalMs = 180 * 1000; // 一个小小的附加功能，每隔三分钟把谱面打印到MelonLoader log一次，起到一个谱面备份的作用，防止意外发生
 
     private static string cliPath;
+    private static long lastBackupTick;
 
     public override void OnInitializeMelon()
     {
@@ -54,6 +57,13 @@ public class Core : MelonMod
             {
                 MelonLogger.Warning($"Failed to export simai notes: {e}");
                 return;
+            }
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (now - lastBackupTick >= BackupChartIntervalMs)
+            {
+                MelonLogger.Msg(simaiNotes);
+                lastBackupTick = now;
             }
 
             var psi = new ProcessStartInfo
